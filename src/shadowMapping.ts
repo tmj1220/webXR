@@ -2,7 +2,7 @@ import shadowVertex from './shaders/shadow.vertex.wgsl?raw'
 import shadowFrag from './shaders/shadow.frag.wgsl?raw'
 import shadowDepth from './shaders/shadowDepth.wgsl?raw'
 import * as sphere from './util/sphere'
-import * as box from './util/box'
+import * as box from './util/box2'
 import { getModelViewMatrix, getProjectionMatrix } from './util/math'
 import { mat4, vec3 } from 'gl-matrix'
 
