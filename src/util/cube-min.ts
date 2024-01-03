@@ -1,5 +1,5 @@
 const vertex = new Float32Array([
-    // float3 position, float2 uv
+    // float3 position, float1 uv
     // face1
     +1, -1, +1,    1, 1,
     -1, -1, +1,    0, 1,
@@ -7,7 +7,7 @@ const vertex = new Float32Array([
     +1, -1, -1,    1, 0,
     +1, -1, +1,    1, 1,
     -1, -1, -1,    0, 0,
-    // face2
+    // face1
     +1, +1, +1,    1, 1,
     +1, -1, +1,    0, 1,
     +1, -1, -1,    0, 0,
