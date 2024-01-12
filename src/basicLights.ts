@@ -1,38 +1,34 @@
 import normal from './shaders/normal.vert.wgsl?raw'
 import lambert from './shaders/lambert.frag.wgsl?raw'
 import * as sphere from './util/sphere'
-import * as box2 from './util/box2'
+// import * as box from './util/box'
+import * as box from './util/box2';
 import { getModelViewMatrix, getProjectionMatrix } from './util/math'
 
-/** 数据缝合 */
-const newVertex: any = []
-const newUv: any = []
-box2.vertex.forEach((_, i) => {
-    if ((i + 1) % 3 === 0) {
-        newVertex.push({
-            data: [box2.vertex[i - 2], box2.vertex[i - 1], box2.vertex[i]]
-        })
+const spherePosition: number[] = []
+const sphereNormalAndUv: number[] = []
+sphere.vertex.forEach((item, idx) => {
+    const lineIdx = idx % 8
+    if (lineIdx < 3) {
+        spherePosition.push(item)
+    } else {
+        sphereNormalAndUv.push(item)
+
     }
 })
-box2.normalAndUv.forEach((_, i) => {
-    if ((i + 1) % 5 === 0) {
-        newUv.push({
-            data: [box2.normalAndUv[i - 4], box2.normalAndUv[i - 3], 
-            box2.normalAndUv[i - 2], box2.normalAndUv[i - 1], box2.normalAndUv[i]]
-        })
-    }
-})
-const list = newVertex.map((v: any,i: any) => ({
-    data: v.data.concat(newUv[i].data)
-}))
-let listData: any = []
-list.forEach((v: any) => {
-    listData = listData.concat(v.data)
-})
-const vertex = new Float32Array(listData)
+const [spherePositionVertex, sphereNormalAndUvVertex] = [spherePosition, sphereNormalAndUv].map(
+  item => new Float32Array(item)
+);
+
+// 实现方式：
+// 1.修改vertex的解析方式，拆分成两个解析入口，一个position，一个color+uv
+// 2.writeBuffer写入两个buffer
+// 3.setVertexBuffer设置定点的时候设置两次对应两个解析入口
+// 4.因为球形定点和方形不同所以转换一下球形定点数据重复2,3步骤
+
 // initialize webgpu device & config canvas context
 async function initWebGPU(canvas: HTMLCanvasElement) {
-    if (!navigator.gpu)
+    if(!navigator.gpu)
         throw new Error('Not Support WebGPU')
     const adapter = await navigator.gpu.requestAdapter()
     if (!adapter)
@@ -43,17 +39,17 @@ async function initWebGPU(canvas: HTMLCanvasElement) {
     const devicePixelRatio = window.devicePixelRatio || 1
     canvas.width = canvas.clientWidth * devicePixelRatio
     canvas.height = canvas.clientHeight * devicePixelRatio
-    const size = { width: canvas.width, height: canvas.height }
+    const size = {width: canvas.width, height: canvas.height}
     context.configure({
         device, format,
         // prevent chrome warning after v102
         alphaMode: 'opaque'
     })
-    return { device, context, format, size }
+    return {device, context, format, size}
 }
 
 // create pipiline & buffers
-async function initPipeline(device: GPUDevice, format: GPUTextureFormat, size: { width: number, height: number }) {
+async function initPipeline(device: GPUDevice, format: GPUTextureFormat, size:{width:number, height:number}) {
     const pipeline = await device.createRenderPipelineAsync({
         label: 'Basic Pipline',
         layout: 'auto',
@@ -62,29 +58,36 @@ async function initPipeline(device: GPUDevice, format: GPUTextureFormat, size: {
                 code: normal,
             }),
             entryPoint: 'main',
-            buffers: [{
-                arrayStride: 8 * 4, // 3 position 2 uv,
-                attributes: [
+            buffers: [
+                {
+                  arrayStride: 3 * 4, // 3 position 2 uv,
+                  attributes: [
                     {
-                        // position
-                        shaderLocation: 0,
-                        offset: 0,
-                        format: 'float32x3',
+                      // position
+                      shaderLocation: 0,
+                      offset: 0,
+                      format: 'float32x3',
+                    },
+                  ],
+                },
+                {
+                  arrayStride: 5 * 4,
+                  attributes: [
+                    {
+                      // normal
+                      shaderLocation: 1,
+                      offset: 0,
+                      format: 'float32x3',
                     },
                     {
-                        // normal
-                        shaderLocation: 1,
-                        offset: 3 * 4,
-                        format: 'float32x3',
+                      // uv
+                      shaderLocation: 2,
+                      offset: 3 * 4,
+                      format: 'float32x2',
                     },
-                    {
-                        // uv
-                        shaderLocation: 2,
-                        offset: 6 * 4,
-                        format: 'float32x2',
-                    },
-                ]
-            }]
+                  ],
+                },
+              ],
         },
         fragment: {
             module: device.createShaderModule({
@@ -120,19 +123,29 @@ async function initPipeline(device: GPUDevice, format: GPUTextureFormat, size: {
     const boxBuffer = {
         vertex: device.createBuffer({
             label: 'GPUBuffer store vertex',
-            size: vertex.byteLength,
+            size: box.vertex.byteLength,
             usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
         }),
+        normalAndUv: device.createBuffer({
+            label: 'GPUBuffer store normalAndUv',
+            size: box.normalAndUv.byteLength,
+            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+          }),
         index: device.createBuffer({
             label: 'GPUBuffer store vertex index',
-            size: box2.index.byteLength,
+            size: box.index.byteLength,
             usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
         })
     }
     const sphereBuffer = {
         vertex: device.createBuffer({
             label: 'GPUBuffer store vertex',
-            size: sphere.vertex.byteLength,
+            size: spherePositionVertex.byteLength,
+            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+        }),
+        normalAndUv: device.createBuffer({
+            label: 'GPUBuffer store vertex',
+            size: sphereNormalAndUvVertex.byteLength,
             usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
         }),
         index: device.createBuffer({
@@ -141,10 +154,11 @@ async function initPipeline(device: GPUDevice, format: GPUTextureFormat, size: {
             usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
         })
     }
-
-    device.queue.writeBuffer(boxBuffer.vertex, 0, vertex)
-    device.queue.writeBuffer(boxBuffer.index, 0, box2.index)
-    device.queue.writeBuffer(sphereBuffer.vertex, 0, sphere.vertex)
+    device.queue.writeBuffer(boxBuffer.vertex, 0, box.vertex)
+    device.queue.writeBuffer(boxBuffer.normalAndUv, 0, box.normalAndUv)
+    device.queue.writeBuffer(boxBuffer.index, 0, box.index)
+    device.queue.writeBuffer(sphereBuffer.vertex, 0, spherePositionVertex)
+    device.queue.writeBuffer(sphereBuffer.normalAndUv, 0, sphereNormalAndUvVertex)
     device.queue.writeBuffer(sphereBuffer.index, 0, sphere.index)
 
     // create a 4x4xNUM STORAGE buffer to store matrix
@@ -235,21 +249,21 @@ async function initPipeline(device: GPUDevice, format: GPUTextureFormat, size: {
     })
     // return all vars
     return {
-        pipeline, boxBuffer, sphereBuffer,
-        modelViewBuffer, projectionBuffer, colorBuffer, vsGroup,
-        ambientBuffer, pointBuffer, directionalBuffer, lightGroup,
+        pipeline, boxBuffer, sphereBuffer, 
+        modelViewBuffer, projectionBuffer, colorBuffer, vsGroup, 
+        ambientBuffer, pointBuffer, directionalBuffer, lightGroup, 
         depthTexture, depthView
     }
 }
 
 // create & submit device commands
 function draw(
-    device: GPUDevice,
+    device: GPUDevice, 
     context: GPUCanvasContext,
     pipelineObj: {
         pipeline: GPURenderPipeline,
-        boxBuffer: { vertex: GPUBuffer, index: GPUBuffer },
-        sphereBuffer: { vertex: GPUBuffer, index: GPUBuffer },
+        boxBuffer: {vertex: GPUBuffer, index: GPUBuffer,normalAndUv:GPUBuffer},
+        sphereBuffer: {vertex: GPUBuffer, index: GPUBuffer,normalAndUv:GPUBuffer},
         vsGroup: GPUBindGroup,
         lightGroup: GPUBindGroup
         depthView: GPUTextureView
@@ -278,10 +292,12 @@ function draw(
     passEncoder.setBindGroup(1, pipelineObj.lightGroup)
     // set box vertex
     passEncoder.setVertexBuffer(0, pipelineObj.boxBuffer.vertex)
+    passEncoder.setVertexBuffer(1, pipelineObj.boxBuffer.normalAndUv)
     passEncoder.setIndexBuffer(pipelineObj.boxBuffer.index, 'uint16')
-    passEncoder.drawIndexed(box2.indexCount, NUM / 2, 0, 0, 0)
+    passEncoder.drawIndexed(box.indexCount, NUM / 2, 0, 0, 0)
     // set sphere vertex
     passEncoder.setVertexBuffer(0, pipelineObj.sphereBuffer.vertex)
+    passEncoder.setVertexBuffer(1, pipelineObj.sphereBuffer.normalAndUv)
     passEncoder.setIndexBuffer(pipelineObj.sphereBuffer.index, 'uint16')
     passEncoder.drawIndexed(sphere.indexCount, NUM / 2, 0, 0, NUM / 2)
     passEncoder.end()
@@ -291,33 +307,33 @@ function draw(
 
 // total objects
 const NUM = 500
-async function run() {
+async function run(){
     const canvas = document.querySelector('canvas')
     if (!canvas)
         throw new Error('No Canvas')
-
-    const { device, context, format, size } = await initWebGPU(canvas)
+    
+    const {device, context, format, size} = await initWebGPU(canvas)
     const pipelineObj = await initPipeline(device, format, size)
 
     // create objects
-    const scene: any[] = []
+    const scene:any[] = []
     const modelViewMatrix = new Float32Array(NUM * 4 * 4)
     const colorBuffer = new Float32Array(NUM * 4)
-    for (let i = 0; i < NUM; i++) {
+    for(let i = 0; i < NUM; i++){
         // craete simple object
-        const position = { x: Math.random() * 40 - 20, y: Math.random() * 40 - 20, z: - 50 - Math.random() * 50 }
-        const rotation = { x: Math.random(), y: Math.random(), z: Math.random() }
-        const scale = { x: 1, y: 1, z: 1 }
+        const position = {x: Math.random() * 40 - 20, y: Math.random() * 40 - 20, z:  - 50 - Math.random() * 50}
+        const rotation = {x: Math.random(), y: Math.random(), z: Math.random()}
+        const scale = {x:1, y:1, z:1}
         const modelView = getModelViewMatrix(position, rotation, scale)
         modelViewMatrix.set(modelView, i * 4 * 4)
         // random color for each object
         colorBuffer.set([Math.random(), Math.random(), Math.random(), 1], i * 4)
-        scene.push({ position, rotation, scale })
+        scene.push({position, rotation, scale})
     }
     // write matrix & colors
     device.queue.writeBuffer(pipelineObj.colorBuffer, 0, colorBuffer)
     device.queue.writeBuffer(pipelineObj.modelViewBuffer, 0, modelViewMatrix)
-
+    
     // ambient light, just 1 float32
     const ambient = new Float32Array([0.1])
     // point light, 2 x vec4: 4 position + 4 configs
@@ -328,9 +344,9 @@ async function run() {
     // dir light, 2 x vec4: 4 position + 4 configs
     const directionalLight = new Float32Array(8)
     directionalLight[4] = 0.5 // intensity
-
+    
     // start loop
-    function frame() {
+    function frame(){
         // update lights position
         const now = performance.now()
         pointLight[0] = 10 * Math.sin(now / 1000)
@@ -348,27 +364,27 @@ async function run() {
     frame()
 
     // UI
-    document.querySelector('#ambient')?.addEventListener('input', (e: Event) => {
+    document.querySelector('#ambient')?.addEventListener('input', (e:Event) => {
         ambient[0] = +(e.target as HTMLInputElement).value
     })
-    document.querySelector('#point')?.addEventListener('input', (e: Event) => {
+    document.querySelector('#point')?.addEventListener('input', (e:Event) => {
         pointLight[4] = +(e.target as HTMLInputElement).value
     })
-    document.querySelector('#radius')?.addEventListener('input', (e: Event) => {
+    document.querySelector('#radius')?.addEventListener('input', (e:Event) => {
         pointLight[5] = +(e.target as HTMLInputElement).value
     })
-    document.querySelector('#dir')?.addEventListener('input', (e: Event) => {
+    document.querySelector('#dir')?.addEventListener('input', (e:Event) => {
         directionalLight[4] = +(e.target as HTMLInputElement).value
     })
 
-    function updateCamera() {
+    function updateCamera(){
         const aspect = size.width / size.height
         const projectionMatrix = getProjectionMatrix(aspect)
         device.queue.writeBuffer(pipelineObj.projectionBuffer, 0, projectionMatrix)
     }
     updateCamera()
     // re-configure context on resize
-    window.addEventListener('resize', () => {
+    window.addEventListener('resize', ()=>{
         size.width = canvas.width = canvas.clientWidth * devicePixelRatio
         size.height = canvas.height = canvas.clientHeight * devicePixelRatio
         // don't need to recall context.configure() after v104
