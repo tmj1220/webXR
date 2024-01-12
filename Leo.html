@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>狮子座demo</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+    }
+
+    #canvas {
+      background: url("./images/sky.jpg");
+      background-size: cover;
+      background-position: right bottom;
+    }
+  </style>
+</head>
+
+<body>
+  <canvas id="canvas"></canvas>
+  <!-- 顶点着色器 -->
+  <script id="vertexShader" type="x-shader/x-vertex">
+      attribute vec4 a_Attr;
+      varying float v_Alpha;
+      void main(){
+          gl_Position=vec4(a_Attr.x,a_Attr.y,0.0,1.0);
+          gl_PointSize=a_Attr.z;
+          v_Alpha=a_Attr.w;
+      }
+    </script>
+  <!-- 片元着色器 -->
+  <script id="fragmentShader" type="x-shader/x-fragment">
+    precision mediump float;    
+    uniform bool u_IsPOINTS;
+    varying float v_Alpha;
+    void main(){ 
+      if(u_IsPOINTS){
+        float dist=distance(gl_PointCoord,vec2(0.5,0.5));
+        if(dist<0.5){
+          gl_FragColor=vec4(0.87,0.91,1,v_Alpha);
+        }else{
+          discard;
+        }
+      }else{
+        gl_FragColor=vec4(0.87,0.91,1,v_Alpha);
+      }
+    }  
+  </script>
+  <script type="module">
+    import { initShaders, getMousePosInWebgl, glToCssPos } from "../jsm/Utils.js";
+    import Poly from '../jsm/Poly.js';
+    import Sky from '../jsm/Sky.js';
+    import Compose from '../jsm/Compose.js';
+    import Track from '../jsm/Track.js';
+    // canvas 画布
+    const canvas = document.getElementById('canvas');
+    canvas.width=window.innerWidth;
+    canvas.height=window.innerHeight;
+    // webgl画笔
+    const gl = canvas.getContext('webgl');
+    // 顶点着色器
+    const vsSource = document.getElementById('vertexShader').innerText;
+    // 片元着色器
+    const fsSource = document.getElementById('fragmentShader').innerText;
+    // 开启片元的颜色合成功能
+    gl.enable(gl.BLEND);
+    // 设置片元的合成方式
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    // 初始化着色器
+    initShaders(gl, vsSource, fsSource);
+    // 指定将要用来清理绘图区的颜色
+    gl.clearColor(0, 0, 0, 0);
+    // 清理绘图区
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    // 建立夜空对象，用于承载多边形
+    const sky = new Sky(gl)
+    // 建立合成对象，用于对顶点数据做补间运算
+    const compose = new Compose()
+    // 当前正在绘制的多边形
+    let poly = null
+    // 鼠标划上的点
+    let point = null
+    // 取消右击提示
+    canvas.oncontextmenu = function () {
+      return false
+    }
+    // 鼠标按下事件
+    canvas.addEventListener('mousedown', (event) => {
+      if (event.button === 2) {
+        // 右击删除顶点
+        poly && popVertice()
+      } else {
+        const { x, y } = getMousePosInWebgl(event, canvas)
+        if (poly) {
+          // 连续添加顶点
+          addVertice(x, y)
+        } else {
+          // 建立多边形
+          crtPoly(x, y)
+        }
+      }
+      render()
+    })
+    // 鼠标移动事件
+    canvas.addEventListener('mousemove', (event) => {
+      const { x, y } = getMousePosInWebgl(event, canvas)
+      point = hoverPoint(x, y)
+      canvas.style.cursor = point ? 'pointer' : 'default'
+      if (poly) {
+        const obj = poly.geoData[poly.geoData.length - 1]
+        obj.x = x
+        obj.y = y
+      }
+    })
+    !(function ani() {
+      compose.update(new Date())
+      sky.updateVertices(['x', 'y', 'pointSize', 'alpha'])
+      render()
+      requestAnimationFrame(ani)
+    })()
+    // 创建多边形
+    function crtPoly(x, y) {
+      let o1 = point ? point : { x, y, pointSize: random(), alpha: 1 }
+      const o2 = { x, y, pointSize: random(), alpha: 1 }
+      poly = new Poly({
+        size: 4,
+        attrName: 'a_Attr',
+        geoData: [o1, o2],
+        types: ['POINTS', 'LINE_STRIP'],
+        circleDot: true
+      })
+      sky.add(poly)
+      crtTrack(o1)
+      crtTrack(o2)
+    }
+    // 添加顶点
+    function addVertice(x, y) {
+      const { geoData } = poly
+      if (point) {
+        geoData[geoData.length - 1] = point
+      }
+      let obj = { x, y, pointSize: random(), alpha: 1 }
+      geoData.push(obj)
+      crtTrack(obj)
+    }
+    // 删除最后一个顶点
+    function popVertice() {
+      poly.geoData.pop()
+      const { children } = compose
+      const last = children[children.length - 1]
+      children.delete(last)
+      poly = null
+    }
+    // 建立时间轨
+    function crtTrack(obj) {
+      const { pointSize } = obj
+      const track = new Track(obj)
+      track.start = new Date()
+      track.timeLen = 2000
+      track.loop = true
+      track.keyMap = new Map([
+        [
+          "pointSize",
+          [
+            [500, pointSize],
+            [1000, 0],
+            [1500, pointSize],
+          ],
+        ],
+        [
+          "alpha",
+          [
+            [500, 1],
+            [1000, 0],
+            [1500, 1],
+          ],
+        ],
+      ]);
+      compose.add(track)
+    }
+    // 检测所有顶点的鼠标划入，返回顶点数据
+    function hoverPoint(mx, my) {
+      for (let { geoData } of sky.children) {
+        for (let obj of geoData) {
+          if (poly && obj === poly.geoData[poly.geoData.length - 1]) {
+            continue
+          }
+          const delta = {
+            x: mx - obj.x,
+            y: my - obj.y
+          }
+          const { x, y } = glToCssPos(delta, canvas)
+          const dist = x * x + y * y
+          if (dist < 100) {
+            return obj
+          }
+        }
+      }
+      return null
+    }
+    // 顶点的尺寸是一个随机数
+    function random() {
+      return Math.random() * 8 + 3
+    }
+    // 渲染
+    function render() {
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      sky.draw()
+    }
+
+  </script>
+</body>
+
+</html>

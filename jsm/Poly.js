@@ -1,127 +1,81 @@
-const defAttr = () => ({
-  gl: null,
-  type: 'POINTS',
-  source: [],
-  sourceSize: 0,
-  elementBytes: 4,
-  categorySize: 0,
-  attributes: {},
-  uniforms: {},
-  maps: {}
+const defAttr=()=>({
+  gl:null,
+  vertices:[],
+  geoData:[],
+  size:2,
+  attrName:'a_Position',
+  uniName:'u_IsPOINTS',
+  count:0,
+  types: ['POINTS'],
+  circleDot: false,
+  u_IsPOINTS:null
 })
-export default class Poly {
-  constructor(attr) {
+export default class Poly{
+  constructor(attr){
     Object.assign(this,defAttr(),attr)
     this.init()
   }
-  init() {
-    if (!this.gl) { return }
-    this.calculateSize()
-    this.updateAttribute();
-    this.updateUniform();
-    this.updateMaps()
-  }
-  calculateSize() {
-    const { attributes,elementBytes,source } = this
-    let categorySize = 0
-    Object.values(attributes).forEach(ele => {
-      const { size,index } = ele
-      categorySize += size
-      ele.byteIndex = index * elementBytes
-    })
-    this.categorySize = categorySize
-    this.categoryBytes = categorySize * elementBytes
-    this.sourceSize = source.length / categorySize
-  }
-  updateAttribute() {
-    const { gl,attributes,categoryBytes,source } = this
-    const sourceBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER,sourceBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(source),gl.STATIC_DRAW)
-    for (let [key,{ size,byteIndex }] of Object.entries(attributes)) {
-      const attr = gl.getAttribLocation(gl.program,key)
-      gl.vertexAttribPointer(
-        attr,
-        size,
-        gl.FLOAT,
-        false,
-        categoryBytes,
-        byteIndex
-      )
-      gl.enableVertexAttribArray(attr)
+  init(){
+    const {attrName,size,gl,circleDot}=this
+    if(!gl){return}
+    //缓冲对象
+    const vertexBuffer = gl.createBuffer();
+    //绑定缓冲对象
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+    //写入数据
+    this.updateBuffer()
+    //获取attribute 变量
+    const a_Position=gl.getAttribLocation(gl.program, attrName)
+    //修改attribute 变量
+    gl.vertexAttribPointer(a_Position, size, gl.FLOAT, false, 0, 0)
+    //赋能-批处理
+    gl.enableVertexAttribArray(a_Position)
+    //如果是圆点，就获取一下uniform 变量
+    if (circleDot) {
+      this.u_IsPOINTS=gl.getUniformLocation(gl.program, 'u_IsPOINTS')
     }
   }
-  updateUniform() {
-    const { gl,uniforms } = this
-    for (let [key,val] of Object.entries(uniforms)) {
-      const { type,value } = val
-      const u = gl.getUniformLocation(gl.program,key)
-      if (type.includes('Matrix')) {
-        gl[type](u,false,value)
-      } else {
-        gl[type](u,value)
-      }
-    }
+
+  updateBuffer(){
+    const {gl,vertices}=this
+    this.updateCount()
+    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(vertices),gl.STATIC_DRAW)
   }
-  updateMaps() {
-    const { gl,maps } = this
-    Object.entries(maps).forEach(([key,val],ind) => {
-      const {
-        format = gl.RGB,
-        image,
-        wrapS,
-        wrapT,
-        magFilter,
-        minFilter
-      } = val
-
-      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,1)
-      gl.activeTexture(gl[`TEXTURE${ind}`])
-      const texture = gl.createTexture()
-      gl.bindTexture(gl.TEXTURE_2D,texture)
-
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        format,
-        format,
-        gl.UNSIGNED_BYTE,
-        image
-      )
-
-      wrapS && gl.texParameteri(
-        gl.TEXTURE_2D,
-        gl.TEXTURE_WRAP_S,
-        wrapS
-      )
-      wrapT && gl.texParameteri(
-        gl.TEXTURE_2D,
-        gl.TEXTURE_WRAP_T,
-        wrapT
-      )
-
-      magFilter && gl.texParameteri(
-        gl.TEXTURE_2D,
-        gl.TEXTURE_MAG_FILTER,
-        magFilter
-      )
-
-      if (!minFilter || minFilter > 9729) {
-        gl.generateMipmap(gl.TEXTURE_2D)
-      }
-
-      minFilter && gl.texParameteri(
-        gl.TEXTURE_2D,
-        gl.TEXTURE_MIN_FILTER,
-        minFilter
-      )
-
-      const u = gl.getUniformLocation(gl.program,key)
-      gl.uniform1i(u,ind)
+  updateCount(){
+    this.count=this.vertices.length/this.size
+  }
+  addVertice(...params){
+    this.vertices.push(...params)
+    this.updateBuffer()
+  }
+  popVertice(){
+    const {vertices,size}=this
+    const len=vertices.length
+    vertices.splice(len-size,len)
+    this.updateCount()
+  }
+  setVertice(ind,...params){
+    const {vertices,size}=this
+    const i=ind*size
+    params.forEach((param,paramInd)=>{
+      vertices[i+paramInd]=param
     })
   }
-  draw(type = this.type) {
-    const { gl,sourceSize } = this
-    gl.drawArrays(gl[type],0,sourceSize);
+  updateVertices(params){
+    const {geoData}=this
+    const vertices=[]
+    geoData.forEach(data=>{
+      params.forEach(key=>{
+        vertices.push(data[key])
+      })
+    })
+    this.vertices=vertices
+  }
+  draw(types=this.types){
+    const {gl,count,circleDot,u_IsPOINTS}=this
+    for (let type of types) {
+      circleDot&&gl.uniform1f(u_IsPOINTS,type==='POINTS')
+      gl.drawArrays(gl[type],0,count);
+    }
   }
 }
