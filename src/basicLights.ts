@@ -1,30 +1,8 @@
 import normal from './shaders/normal.vert.wgsl?raw'
 import lambert from './shaders/lambert.frag.wgsl?raw'
 import * as sphere from './util/sphere'
-// import * as box from './util/box'
-import * as box from './util/box2';
+import * as box from './util/box2'
 import { getModelViewMatrix, getProjectionMatrix } from './util/math'
-
-const spherePosition: number[] = []
-const sphereNormalAndUv: number[] = []
-sphere.vertex.forEach((item, idx) => {
-    const lineIdx = idx % 8
-    if (lineIdx < 3) {
-        spherePosition.push(item)
-    } else {
-        sphereNormalAndUv.push(item)
-
-    }
-})
-const [spherePositionVertex, sphereNormalAndUvVertex] = [spherePosition, sphereNormalAndUv].map(
-  item => new Float32Array(item)
-);
-
-// 实现方式：
-// 1.修改vertex的解析方式，拆分成两个解析入口，一个position，一个color+uv
-// 2.writeBuffer写入两个buffer
-// 3.setVertexBuffer设置定点的时候设置两次对应两个解析入口
-// 4.因为球形定点和方形不同所以转换一下球形定点数据重复2,3步骤
 
 // initialize webgpu device & config canvas context
 async function initWebGPU(canvas: HTMLCanvasElement) {
@@ -60,34 +38,92 @@ async function initPipeline(device: GPUDevice, format: GPUTextureFormat, size:{w
             entryPoint: 'main',
             buffers: [
                 {
-                  arrayStride: 3 * 4, // 3 position 2 uv,
-                  attributes: [
+                arrayStride:3 * 4, // 3 position 2 uv,
+                attributes: [
                     {
-                      // position
-                      shaderLocation: 0,
-                      offset: 0,
-                      format: 'float32x3',
+                        // position
+                        shaderLocation: 0,
+                        offset: 0,
+                        format: 'float32x3',
                     },
-                  ],
-                },
+                ]
+            },
+            {
+                arrayStride:5 * 4, // 3 position 2 uv,
+                attributes: [
+                    {
+                        // normal
+                        shaderLocation: 1,
+                        offset: 0,
+                        format: 'float32x3',
+                    },
+                    {
+                        // uv
+                        shaderLocation: 2,
+                        offset: 3 * 4,
+                        format: 'float32x2',
+                    },
+                ]
+            },
+        ]
+        },
+        fragment: {
+            module: device.createShaderModule({
+                code: lambert,
+            }),
+            entryPoint: 'main',
+            targets: [
                 {
-                  arrayStride: 5 * 4,
-                  attributes: [
+                    format: format
+                }
+            ]
+        },
+        primitive: {
+            topology: 'triangle-list',
+            // Culling backfaces pointing away from the camera
+            cullMode: 'back'
+        },
+        // Enable depth testing since we have z-level positions
+        // Fragment closest to the camera is rendered in front
+        depthStencil: {
+            depthWriteEnabled: true,
+            depthCompare: 'less',
+            format: 'depth24plus',
+        }
+    } as GPURenderPipelineDescriptor)
+    const pipeline2 = await device.createRenderPipelineAsync({
+        label: 'Basic Pipline2',
+        layout: 'auto',
+        vertex: {
+            module: device.createShaderModule({
+                code: normal,
+            }),
+            entryPoint: 'main',
+            buffers: [
+                {
+                arrayStride:8 * 4, // 3 position 2 uv,
+                attributes: [
                     {
-                      // normal
-                      shaderLocation: 1,
-                      offset: 0,
-                      format: 'float32x3',
+                        // position
+                        shaderLocation: 0,
+                        offset: 0,
+                        format: 'float32x3',
                     },
                     {
-                      // uv
-                      shaderLocation: 2,
-                      offset: 3 * 4,
-                      format: 'float32x2',
+                        // normal
+                        shaderLocation: 1,
+                        offset: 3 * 4,
+                        format: 'float32x3',
                     },
-                  ],
-                },
-              ],
+                    {
+                        // uv
+                        shaderLocation: 2,
+                        offset: 6 * 4,
+                        format: 'float32x2',
+                    },
+                ]
+            }
+        ]
         },
         fragment: {
             module: device.createShaderModule({
@@ -126,11 +162,11 @@ async function initPipeline(device: GPUDevice, format: GPUTextureFormat, size:{w
             size: box.vertex.byteLength,
             usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
         }),
-        normalAndUv: device.createBuffer({
-            label: 'GPUBuffer store normalAndUv',
-            size: box.normalAndUv.byteLength,
-            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-          }),
+        normalAndUv:device.createBuffer({
+            label:'GPUBuffer store normal uv',
+            size:box.normalAndUv.byteLength,
+            usage:GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+        }),
         index: device.createBuffer({
             label: 'GPUBuffer store vertex index',
             size: box.index.byteLength,
@@ -140,12 +176,7 @@ async function initPipeline(device: GPUDevice, format: GPUTextureFormat, size:{w
     const sphereBuffer = {
         vertex: device.createBuffer({
             label: 'GPUBuffer store vertex',
-            size: spherePositionVertex.byteLength,
-            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
-        }),
-        normalAndUv: device.createBuffer({
-            label: 'GPUBuffer store vertex',
-            size: sphereNormalAndUvVertex.byteLength,
+            size: sphere.vertex.byteLength,
             usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
         }),
         index: device.createBuffer({
@@ -157,8 +188,7 @@ async function initPipeline(device: GPUDevice, format: GPUTextureFormat, size:{w
     device.queue.writeBuffer(boxBuffer.vertex, 0, box.vertex)
     device.queue.writeBuffer(boxBuffer.normalAndUv, 0, box.normalAndUv)
     device.queue.writeBuffer(boxBuffer.index, 0, box.index)
-    device.queue.writeBuffer(sphereBuffer.vertex, 0, spherePositionVertex)
-    device.queue.writeBuffer(sphereBuffer.normalAndUv, 0, sphereNormalAndUvVertex)
+    device.queue.writeBuffer(sphereBuffer.vertex, 0, sphere.vertex)
     device.queue.writeBuffer(sphereBuffer.index, 0, sphere.index)
 
     // create a 4x4xNUM STORAGE buffer to store matrix
@@ -252,7 +282,7 @@ async function initPipeline(device: GPUDevice, format: GPUTextureFormat, size:{w
         pipeline, boxBuffer, sphereBuffer, 
         modelViewBuffer, projectionBuffer, colorBuffer, vsGroup, 
         ambientBuffer, pointBuffer, directionalBuffer, lightGroup, 
-        depthTexture, depthView
+        depthTexture, depthView,pipeline2
     }
 }
 
@@ -261,9 +291,10 @@ function draw(
     device: GPUDevice, 
     context: GPUCanvasContext,
     pipelineObj: {
+        pipeline2:GPURenderPipeline,
         pipeline: GPURenderPipeline,
-        boxBuffer: {vertex: GPUBuffer, index: GPUBuffer,normalAndUv:GPUBuffer},
-        sphereBuffer: {vertex: GPUBuffer, index: GPUBuffer,normalAndUv:GPUBuffer},
+        boxBuffer: {vertex: GPUBuffer, index: GPUBuffer, normalAndUv:GPUBuffer},
+        sphereBuffer: {vertex: GPUBuffer, index: GPUBuffer},
         vsGroup: GPUBindGroup,
         lightGroup: GPUBindGroup
         depthView: GPUTextureView
@@ -296,8 +327,8 @@ function draw(
     passEncoder.setIndexBuffer(pipelineObj.boxBuffer.index, 'uint16')
     passEncoder.drawIndexed(box.indexCount, NUM / 2, 0, 0, 0)
     // set sphere vertex
+    passEncoder.setPipeline(pipelineObj.pipeline2)
     passEncoder.setVertexBuffer(0, pipelineObj.sphereBuffer.vertex)
-    passEncoder.setVertexBuffer(1, pipelineObj.sphereBuffer.normalAndUv)
     passEncoder.setIndexBuffer(pipelineObj.sphereBuffer.index, 'uint16')
     passEncoder.drawIndexed(sphere.indexCount, NUM / 2, 0, 0, NUM / 2)
     passEncoder.end()

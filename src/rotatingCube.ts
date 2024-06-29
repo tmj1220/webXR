@@ -165,7 +165,7 @@ async function run(){
     const pipelineObj = await initPipeline(device, format, size)
     // default state
     let aspect = size.width/ size.height
-    const position = {x:0, y:0, z: -5}
+    const position = {x:0, y:0, z: -8}
     const scale = {x:1, y:1, z:1}
     const rotation = {x: 0, y: 0, z:0}
     // start loop
